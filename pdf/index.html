@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dzielenie PDF</title>
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --card: #ffffff;
+      --text: #1d2330;
+      --muted: #6b7280;
+      --border: #d9dde4;
+      --accent: #2f6fed;
+      --accent-hover: #2459c7;
+      --accent-soft: #e8efff;
+      --error: #c62828;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14171c;
+        --card: #1d2128;
+        --text: #e6e8ec;
+        --muted: #9aa1ad;
+        --border: #333a45;
+        --accent: #5b8cff;
+        --accent-hover: #7aa2ff;
+        --accent-soft: #1f2a44;
+        --error: #ff6b6b;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    main { max-width: 1000px; margin: 0 auto; padding: 32px 16px 64px; }
+    h1 { margin: 0 0 4px; font-size: 1.8rem; }
+    .lead { margin: 0 0 24px; color: var(--muted); }
+
+    .dropzone {
+      display: block;
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      background: var(--card);
+      padding: 40px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: var(--accent-soft); }
+    .dropzone strong { display: block; font-size: 1.1rem; margin-bottom: 4px; }
+    .dropzone span { color: var(--muted); font-size: .95rem; }
+    .dropzone input { display: none; }
+
+    .status { margin: 16px 0 0; min-height: 1.5em; color: var(--muted); }
+    .status.error { color: var(--error); }
+
+    .toolbar {
+      display: none;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      margin: 24px 0 16px;
+    }
+    .toolbar.visible { display: flex; }
+    .toolbar .info { font-weight: 600; word-break: break-all; }
+    .toolbar .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    button, .btn {
+      font: inherit;
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #fff;
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    button:hover, .btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+    button.secondary { background: transparent; color: var(--accent); }
+    button.secondary:hover { background: var(--accent-soft); }
+    button:disabled { opacity: .5; cursor: default; }
+
+    .pages {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 16px;
+    }
+    .page {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .thumb {
+      aspect-ratio: 1 / 1.414;
+      background: var(--bg);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: .85rem;
+    }
+    .thumb canvas { max-width: 100%; max-height: 100%; box-shadow: 0 1px 3px rgba(0,0,0,.2); background: #fff; }
+    .page .label { font-size: .9rem; text-align: center; color: var(--muted); }
+    .page button { width: 100%; }
+
+    footer { margin-top: 40px; color: var(--muted); font-size: .85rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Dzielenie PDF na strony</h1>
+    <p class="lead">Wrzuć plik PDF, a każda jego strona stanie się osobnym plikiem PDF. Wszystko dzieje się w Twojej przeglądarce. Plik nie jest nigdzie wysyłany.</p>
+
+    <label class="dropzone" id="dropzone">
+      <strong>Przeciągnij tutaj plik PDF</strong>
+      <span>albo kliknij, aby wybrać go z dysku</span>
+      <input type="file" id="fileInput" accept="application/pdf,.pdf">
+    </label>
+
+    <p class="status" id="status" role="status"></p>
+
+    <div class="toolbar" id="toolbar">
+      <div class="info" id="info"></div>
+      <div class="actions">
+        <button id="zipBtn">Pobierz wszystkie (ZIP)</button>
+        <button id="resetBtn" class="secondary">Inny plik</button>
+      </div>
+    </div>
+
+    <div class="pages" id="pages"></div>
+
+    <footer>Działa offline po załadowaniu strony. Pliki nie opuszczają Twojego komputera.</footer>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+    const dropzone = document.getElementById("dropzone");
+    const fileInput = document.getElementById("fileInput");
+    const statusEl = document.getElementById("status");
+    const toolbar = document.getElementById("toolbar");
+    const infoEl = document.getElementById("info");
+    const pagesEl = document.getElementById("pages");
+    const zipBtn = document.getElementById("zipBtn");
+    const resetBtn = document.getElementById("resetBtn");
+
+    let srcDoc = null;      // dokument pdf-lib
+    let baseName = "plik";
+    let pageCount = 0;
+    let loadToken = 0;      // przerywa renderowanie miniatur po zmianie pliku
+
+    function setStatus(text, isError) {
+      statusEl.textContent = text;
+      statusEl.classList.toggle("error", !!isError);
+    }
+
+    function pad(n) {
+      return String(n).padStart(String(pageCount).length, "0");
+    }
+
+    function pageFileName(i) {
+      return `${baseName}_strona_${pad(i + 1)}.pdf`;
+    }
+
+    async function buildPage(i) {
+      const out = await PDFLib.PDFDocument.create();
+      const [copied] = await out.copyPages(srcDoc, [i]);
+      out.addPage(copied);
+      return out.save();
+    }
+
+    function download(bytes, name, type) {
+      const url = URL.createObjectURL(new Blob([bytes], { type }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }
+
+    async function handleFile(file) {
+      if (!file) return;
+      if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) {
+        setStatus("To nie jest plik PDF.", true);
+        return;
+      }
+
+      const token = ++loadToken;
+      pagesEl.innerHTML = "";
+      toolbar.classList.remove("visible");
+      setStatus("Wczytywanie pliku…");
+
+      try {
+        const buf = await file.arrayBuffer();
+        srcDoc = await PDFLib.PDFDocument.load(buf, { ignoreEncryption: true });
+        pageCount = srcDoc.getPageCount();
+        baseName = file.name.replace(/\.pdf$/i, "") || "plik";
+
+        infoEl.textContent = `${file.name}: ${pageCount} ${pageCount === 1 ? "strona" : (pageCount % 10 >= 2 && pageCount % 10 <= 4 && (pageCount % 100 < 10 || pageCount % 100 >= 20) ? "strony" : "stron")}`;
+        toolbar.classList.add("visible");
+        setStatus("");
+
+        const canvases = [];
+        for (let i = 0; i < pageCount; i++) {
+          const card = document.createElement("div");
+          card.className = "page";
+
+          const thumb = document.createElement("div");
+          thumb.className = "thumb";
+          thumb.textContent = "…";
+
+          const label = document.createElement("div");
+          label.className = "label";
+          label.textContent = `Strona ${i + 1}`;
+
+          const btn = document.createElement("button");
+          btn.textContent = "Pobierz";
+          btn.addEventListener("click", async () => {
+            btn.disabled = true;
+            try {
+              download(await buildPage(i), pageFileName(i), "application/pdf");
+            } catch (e) {
+              setStatus(`Nie udało się zapisać strony ${i + 1}: ${e.message}`, true);
+            } finally {
+              btn.disabled = false;
+            }
+          });
+
+          card.append(thumb, label, btn);
+          pagesEl.appendChild(card);
+          canvases.push(thumb);
+        }
+
+        renderThumbnails(buf, canvases, token);
+      } catch (e) {
+        console.error(e);
+        srcDoc = null;
+        setStatus("Nie udało się odczytać pliku. Może jest uszkodzony lub zabezpieczony hasłem.", true);
+      }
+    }
+
+    async function renderThumbnails(buf, thumbs, token) {
+      try {
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
+        for (let i = 0; i < thumbs.length; i++) {
+          if (token !== loadToken) { pdf.destroy(); return; }
+          const page = await pdf.getPage(i + 1);
+          const viewport0 = page.getViewport({ scale: 1 });
+          const scale = 300 / Math.max(viewport0.width, viewport0.height);
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+          await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+          thumbs[i].textContent = "";
+          thumbs[i].appendChild(canvas);
+          page.cleanup();
+        }
+        pdf.destroy();
+      } catch (e) {
+        console.warn("Podgląd niedostępny:", e);
+        thumbs.forEach(t => { if (!t.firstChild || t.textContent === "…") t.textContent = "brak podglądu"; });
+      }
+    }
+
+    zipBtn.addEventListener("click", async () => {
+      if (!srcDoc) return;
+      zipBtn.disabled = true;
+      try {
+        const zip = new JSZip();
+        for (let i = 0; i < pageCount; i++) {
+          setStatus(`Przygotowywanie strony ${i + 1} z ${pageCount}…`);
+          zip.file(pageFileName(i), await buildPage(i));
+        }
+        setStatus("Pakowanie do ZIP…");
+        const blob = await zip.generateAsync({ type: "blob" });
+        download(blob, `${baseName}_strony.zip`, "application/zip");
+        setStatus(`Gotowe: ${pageCount} plików w archiwum ZIP.`);
+      } catch (e) {
+        console.error(e);
+        setStatus(`Błąd podczas tworzenia ZIP: ${e.message}`, true);
+      } finally {
+        zipBtn.disabled = false;
+      }
+    });
+
+    resetBtn.addEventListener("click", () => {
+      loadToken++;
+      srcDoc = null;
+      pagesEl.innerHTML = "";
+      toolbar.classList.remove("visible");
+      setStatus("");
+      fileInput.value = "";
+      fileInput.click();
+    });
+
+    fileInput.addEventListener("change", () => handleFile(fileInput.files[0]));
+
+    ["dragenter", "dragover"].forEach(ev => dropzone.addEventListener(ev, e => {
+      e.preventDefault();
+      dropzone.classList.add("drag");
+    }));
+    ["dragleave", "drop"].forEach(ev => dropzone.addEventListener(ev, e => {
+      e.preventDefault();
+      dropzone.classList.remove("drag");
+    }));
+    dropzone.addEventListener("drop", e => handleFile(e.dataTransfer.files[0]));
+  </script>
+</body>
+</html>
