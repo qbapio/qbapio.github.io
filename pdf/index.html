@@ -89,7 +89,7 @@
 
     .pages {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
       gap: 16px;
     }
     .page {
@@ -116,6 +116,18 @@
     .thumb canvas { max-width: 100%; max-height: 100%; box-shadow: 0 1px 3px rgba(0,0,0,.2); background: #fff; }
     .page .label { font-size: .9rem; text-align: center; color: var(--muted); }
     .page button { width: 100%; }
+    .page input.name {
+      font: inherit;
+      font-size: .85rem;
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .page input.name:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .page input.name.missing { border-color: var(--error); }
 
     footer { margin-top: 40px; color: var(--muted); font-size: .85rem; text-align: center; }
   </style>
@@ -123,7 +135,7 @@
 <body>
   <main>
     <h1>Dzielenie PDF na strony</h1>
-    <p class="lead">Wrzuć plik PDF, a każda jego strona stanie się osobnym plikiem PDF. Wszystko dzieje się w Twojej przeglądarce. Plik nie jest nigdzie wysyłany.</p>
+    <p class="lead">Wrzuć plik PDF „Payment Reference”, a każda jego strona stanie się osobnym plikiem PDF o nazwie <em>nazwa dostawcy_dzisiejsza data</em>. Nazwę możesz poprawić przed pobraniem. Wszystko dzieje się w Twojej przeglądarce. Plik nie jest nigdzie wysyłany.</p>
 
     <label class="dropzone" id="dropzone">
       <strong>Przeciągnij tutaj plik PDF</strong>
@@ -165,6 +177,7 @@
     let srcDoc = null;      // dokument pdf-lib
     let baseName = "plik";
     let pageCount = 0;
+    let nameInputs = [];    // pola z nazwą pliku dla każdej strony
     let loadToken = 0;      // przerywa renderowanie miniatur po zmianie pliku
 
     function setStatus(text, isError) {
@@ -172,12 +185,62 @@
       statusEl.classList.toggle("error", !!isError);
     }
 
-    function pad(n) {
-      return String(n).padStart(String(pageCount).length, "0");
+    function todayString() {
+      const d = new Date();
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      return `${dd}-${mm}-${d.getFullYear()}`;
     }
 
-    function pageFileName(i) {
-      return `${baseName}_strona_${pad(i + 1)}.pdf`;
+    // Usuwa znaki niedozwolone w nazwach plików (Windows/macOS/Linux).
+    function safeFileName(name) {
+      return name.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "");
+    }
+
+    // Grupuje fragmenty tekstu strony w linie (od góry do dołu).
+    function textLines(textContent) {
+      const lines = [];
+      for (const item of textContent.items) {
+        if (!item.str.trim()) continue;
+        const y = item.transform[5], x = item.transform[4];
+        let line = lines.find(l => Math.abs(l.y - y) < 2);
+        if (!line) lines.push(line = { y, parts: [] });
+        line.parts.push({ x, str: item.str });
+      }
+      lines.sort((a, b) => b.y - a.y);
+      return lines.map(l => ({
+        y: l.y,
+        text: l.parts.sort((a, b) => a.x - b.x).map(p => p.str).join(" ").replace(/\s+/g, " ").trim(),
+      }));
+    }
+
+    // Wzór "PAYMENT REFERENCE": nagłówek, adres płatnika, potem blok dostawcy.
+    // Bloki są oddzielone większymi odstępami; nazwa dostawcy to pierwsza
+    // linia trzeciego bloku.
+    function findSupplier(lines) {
+      const blocks = [];
+      let prevY = null;
+      for (const line of lines) {
+        if (prevY === null || prevY - line.y > 20) blocks.push([]);
+        blocks[blocks.length - 1].push(line);
+        prevY = line.y;
+      }
+      const header = blocks.findIndex(b => /PAYMENT REFERENCE/i.test(b[0].text));
+      const supplierBlock = header >= 0 ? blocks[header + 2] : null;
+      return supplierBlock ? supplierBlock[0].text : "";
+    }
+
+    // Nazwy plików: dostawca_data, a przy powtórzeniach dopisek _2, _3...
+    function currentFileNames() {
+      const used = new Map();
+      return nameInputs.map((input, i) => {
+        let name = safeFileName(input.value) || `${baseName}_strona_${i + 1}`;
+        const key = name.toLowerCase();
+        const n = (used.get(key) || 0) + 1;
+        used.set(key, n);
+        if (n > 1) name += `_${n}`;
+        return name + ".pdf";
+      });
     }
 
     async function buildPage(i) {
@@ -207,64 +270,91 @@
 
       const token = ++loadToken;
       pagesEl.innerHTML = "";
+      nameInputs = [];
       toolbar.classList.remove("visible");
       setStatus("Wczytywanie pliku…");
 
+      let pdf;
       try {
         const buf = await file.arrayBuffer();
         srcDoc = await PDFLib.PDFDocument.load(buf, { ignoreEncryption: true });
         pageCount = srcDoc.getPageCount();
-        baseName = file.name.replace(/\.pdf$/i, "") || "plik";
-
-        infoEl.textContent = `${file.name}: ${pageCount} ${pageCount === 1 ? "strona" : (pageCount % 10 >= 2 && pageCount % 10 <= 4 && (pageCount % 100 < 10 || pageCount % 100 >= 20) ? "strony" : "stron")}`;
-        toolbar.classList.add("visible");
-        setStatus("");
-
-        const canvases = [];
-        for (let i = 0; i < pageCount; i++) {
-          const card = document.createElement("div");
-          card.className = "page";
-
-          const thumb = document.createElement("div");
-          thumb.className = "thumb";
-          thumb.textContent = "…";
-
-          const label = document.createElement("div");
-          label.className = "label";
-          label.textContent = `Strona ${i + 1}`;
-
-          const btn = document.createElement("button");
-          btn.textContent = "Pobierz";
-          btn.addEventListener("click", async () => {
-            btn.disabled = true;
-            try {
-              download(await buildPage(i), pageFileName(i), "application/pdf");
-            } catch (e) {
-              setStatus(`Nie udało się zapisać strony ${i + 1}: ${e.message}`, true);
-            } finally {
-              btn.disabled = false;
-            }
-          });
-
-          card.append(thumb, label, btn);
-          pagesEl.appendChild(card);
-          canvases.push(thumb);
-        }
-
-        renderThumbnails(buf, canvases, token);
+        baseName = safeFileName(file.name.replace(/\.pdf$/i, "")) || "plik";
+        pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
       } catch (e) {
         console.error(e);
         srcDoc = null;
         setStatus("Nie udało się odczytać pliku. Może jest uszkodzony lub zabezpieczony hasłem.", true);
+        return;
       }
+
+      setStatus("Odczytywanie nazw dostawców…");
+      const date = todayString();
+      const pages = [];
+      let missing = 0;
+      for (let i = 0; i < pageCount; i++) {
+        if (token !== loadToken) { pdf.destroy(); return; }
+        const page = await pdf.getPage(i + 1);
+        let supplier = "";
+        try { supplier = findSupplier(textLines(await page.getTextContent())); } catch (e) { console.warn(e); }
+        if (!supplier) missing++;
+        pages.push({ page, supplier });
+      }
+
+      const thumbs = [];
+      pages.forEach(({ supplier }, i) => {
+        const card = document.createElement("div");
+        card.className = "page";
+
+        const thumb = document.createElement("div");
+        thumb.className = "thumb";
+        thumb.textContent = "…";
+
+        const label = document.createElement("div");
+        label.className = "label";
+        label.textContent = `Strona ${i + 1}`;
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "name" + (supplier ? "" : " missing");
+        input.value = supplier ? `${safeFileName(supplier)}_${date}` : `${baseName}_strona_${i + 1}`;
+        input.title = "Nazwa pliku (bez .pdf). Możesz ją poprawić.";
+        input.setAttribute("aria-label", `Nazwa pliku dla strony ${i + 1}`);
+        input.addEventListener("input", () => input.classList.remove("missing"));
+
+        const btn = document.createElement("button");
+        btn.textContent = "Pobierz";
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          try {
+            download(await buildPage(i), currentFileNames()[i], "application/pdf");
+          } catch (e) {
+            setStatus(`Nie udało się zapisać strony ${i + 1}: ${e.message}`, true);
+          } finally {
+            btn.disabled = false;
+          }
+        });
+
+        card.append(thumb, label, input, btn);
+        pagesEl.appendChild(card);
+        thumbs.push(thumb);
+        nameInputs.push(input);
+      });
+
+      infoEl.textContent = `${file.name}: ${pageCount} ${pageCount === 1 ? "strona" : (pageCount % 10 >= 2 && pageCount % 10 <= 4 && (pageCount % 100 < 10 || pageCount % 100 >= 20) ? "strony" : "stron")}`;
+      toolbar.classList.add("visible");
+      setStatus(missing
+        ? `Nie znaleziono nazwy dostawcy na ${missing} z ${pageCount} stron (zaznaczone na czerwono). Wpisz nazwę ręcznie.`
+        : "", missing > 0);
+
+      renderThumbnails(pdf, pages.map(p => p.page), thumbs, token);
     }
 
-    async function renderThumbnails(buf, thumbs, token) {
+    async function renderThumbnails(pdf, pages, thumbs, token) {
       try {
-        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
-        for (let i = 0; i < thumbs.length; i++) {
-          if (token !== loadToken) { pdf.destroy(); return; }
-          const page = await pdf.getPage(i + 1);
+        for (let i = 0; i < pages.length; i++) {
+          if (token !== loadToken) break;
+          const page = pages[i];
           const viewport0 = page.getViewport({ scale: 1 });
           const scale = 300 / Math.max(viewport0.width, viewport0.height);
           const viewport = page.getViewport({ scale });
@@ -276,10 +366,11 @@
           thumbs[i].appendChild(canvas);
           page.cleanup();
         }
-        pdf.destroy();
       } catch (e) {
         console.warn("Podgląd niedostępny:", e);
-        thumbs.forEach(t => { if (!t.firstChild || t.textContent === "…") t.textContent = "brak podglądu"; });
+        thumbs.forEach(t => { if (!t.querySelector("canvas")) t.textContent = "brak podglądu"; });
+      } finally {
+        pdf.destroy();
       }
     }
 
@@ -288,13 +379,14 @@
       zipBtn.disabled = true;
       try {
         const zip = new JSZip();
+        const names = currentFileNames();
         for (let i = 0; i < pageCount; i++) {
           setStatus(`Przygotowywanie strony ${i + 1} z ${pageCount}…`);
-          zip.file(pageFileName(i), await buildPage(i));
+          zip.file(names[i], await buildPage(i));
         }
         setStatus("Pakowanie do ZIP…");
         const blob = await zip.generateAsync({ type: "blob" });
-        download(blob, `${baseName}_strony.zip`, "application/zip");
+        download(blob, `${baseName}_${todayString()}.zip`, "application/zip");
         setStatus(`Gotowe: ${pageCount} plików w archiwum ZIP.`);
       } catch (e) {
         console.error(e);
@@ -307,6 +399,7 @@
     resetBtn.addEventListener("click", () => {
       loadToken++;
       srcDoc = null;
+      nameInputs = [];
       pagesEl.innerHTML = "";
       toolbar.classList.remove("visible");
       setStatus("");
