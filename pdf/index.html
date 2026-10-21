@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dzielenie PDF</title>
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --card: #ffffff;
+      --text: #1d2330;
+      --muted: #6b7280;
+      --border: #d9dde4;
+      --accent: #2f6fed;
+      --accent-hover: #2459c7;
+      --accent-soft: #e8efff;
+      --error: #c62828;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14171c;
+        --card: #1d2128;
+        --text: #e6e8ec;
+        --muted: #9aa1ad;
+        --border: #333a45;
+        --accent: #5b8cff;
+        --accent-hover: #7aa2ff;
+        --accent-soft: #1f2a44;
+        --error: #ff6b6b;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    main { max-width: 1000px; margin: 0 auto; padding: 32px 16px 64px; }
+    h1 { margin: 0 0 4px; font-size: 1.8rem; }
+    .lead { margin: 0 0 24px; color: var(--muted); }
+
+    .dropzone {
+      display: block;
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      background: var(--card);
+      padding: 40px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: var(--accent-soft); }
+    .dropzone strong { display: block; font-size: 1.1rem; margin-bottom: 4px; }
+    .dropzone span { color: var(--muted); font-size: .95rem; }
+    .dropzone input { display: none; }
+
+    .status { margin: 16px 0 0; min-height: 1.5em; color: var(--muted); }
+    .status.error { color: var(--error); }
+
+    .toolbar {
+      display: none;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      margin: 24px 0 16px;
+    }
+    .toolbar.visible { display: flex; }
+    .toolbar .info { font-weight: 600; word-break: break-all; }
+    .toolbar .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    button, .btn {
+      font: inherit;
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #fff;
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    button:hover, .btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+    button.secondary { background: transparent; color: var(--accent); }
+    button.secondary:hover { background: var(--accent-soft); }
+    button:disabled { opacity: .5; cursor: default; }
+
+    .pages {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: 16px;
+    }
+    .page {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .thumb {
+      aspect-ratio: 1 / 1.414;
+      background: var(--bg);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: .85rem;
+    }
+    .thumb canvas { max-width: 100%; max-height: 100%; box-shadow: 0 1px 3px rgba(0,0,0,.2); background: #fff; }
+    .page .label { font-size: .9rem; text-align: center; color: var(--muted); }
+    .page button { width: 100%; }
+    .page input.name, .page input.email {
+      font: inherit;
+      font-size: .85rem;
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .page input.name:focus, .page input.email:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .page input.name.missing { border-color: var(--error); }
+    .page input.email.missing { border-color: var(--error); }
+    .page .row { display: flex; gap: 6px; }
+    .page .row button { flex: 1; padding: 8px 6px; }
+
+    .settings {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-top: 16px;
+    }
+    .settings summary { cursor: pointer; font-weight: 600; }
+    .settings .grid { display: grid; gap: 12px; margin-top: 12px; }
+    .settings label { display: grid; gap: 4px; font-size: .9rem; color: var(--muted); }
+    .settings input, .settings textarea {
+      font: inherit;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      width: 100%;
+    }
+    .settings textarea { min-height: 120px; resize: vertical; }
+    .settings .hint { font-size: .85rem; color: var(--muted); margin: 0; }
+    .settings .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    footer { margin-top: 40px; color: var(--muted); font-size: .85rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Dzielenie PDF na strony</h1>
+    <p class="lead">Wrzuć plik PDF „Payment Reference”, a każda jego strona stanie się osobnym plikiem PDF o nazwie <em>nazwa dostawcy_dzisiejsza data</em>. Nazwę możesz poprawić przed pobraniem. Każdą stronę możesz też przygotować do wysłania e-mailem do dostawcy. Wszystko dzieje się w Twojej przeglądarce. Plik nie jest nigdzie wysyłany.</p>
+
+    <label class="dropzone" id="dropzone">
+      <strong>Przeciągnij tutaj plik PDF</strong>
+      <span>albo kliknij, aby wybrać go z dysku</span>
+      <input type="file" id="fileInput" accept="application/pdf,.pdf">
+    </label>
+
+    <details class="settings" id="settings">
+      <summary>Ustawienia e-maili do dostawców</summary>
+      <div class="grid">
+        <p class="hint">Przycisk <strong>E-mail</strong> przy stronie tworzy gotową wiadomość (plik .eml) z adresem dostawcy, tematem, treścią i PDF-em w załączniku. Otwórz ją w Outlooku i kliknij „Wyślij”. W temacie i treści możesz użyć <code>{dostawca}</code> oraz <code>{data}</code>.</p>
+        <label>Temat
+          <input type="text" id="mailSubject">
+        </label>
+        <label>Treść
+          <textarea id="mailBody"></textarea>
+        </label>
+        <p class="hint" id="bookInfo"></p>
+        <div class="actions">
+          <button type="button" class="secondary" id="importBtn">Wczytaj adresy z CSV</button>
+          <button type="button" class="secondary" id="exportBtn">Zapisz adresy do CSV</button>
+          <input type="file" id="importInput" accept=".csv,.txt,text/csv" hidden>
+        </div>
+        <p class="hint">Plik CSV: w każdej linii nazwa dostawcy i adres e-mail, oddzielone średnikiem lub przecinkiem, np. <code>BHC Coding Systems Ltd;accounts@bhc.ie</code>. Adresy wpisane przy stronach zapamiętują się automatycznie w tej przeglądarce.</p>
+      </div>
+    </details>
+
+    <p class="status" id="status" role="status"></p>
+
+    <div class="toolbar" id="toolbar">
+      <div class="info" id="info"></div>
+      <div class="actions">
+        <button id="zipBtn">Pobierz wszystkie (ZIP)</button>
+        <button id="mailZipBtn">E-maile do wszystkich (ZIP)</button>
+        <button id="resetBtn" class="secondary">Inny plik</button>
+      </div>
+    </div>
+
+    <div class="pages" id="pages"></div>
+
+    <footer>Działa offline po załadowaniu strony. Pliki nie opuszczają Twojego komputera.</footer>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+    const dropzone = document.getElementById("dropzone");
+    const fileInput = document.getElementById("fileInput");
+    const statusEl = document.getElementById("status");
+    const toolbar = document.getElementById("toolbar");
+    const infoEl = document.getElementById("info");
+    const pagesEl = document.getElementById("pages");
+    const zipBtn = document.getElementById("zipBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const mailZipBtn = document.getElementById("mailZipBtn");
+    const mailSubject = document.getElementById("mailSubject");
+    const mailBody = document.getElementById("mailBody");
+    const bookInfo = document.getElementById("bookInfo");
+    const importBtn = document.getElementById("importBtn");
+    const exportBtn = document.getElementById("exportBtn");
+    const importInput = document.getElementById("importInput");
+
+    let srcDoc = null;      // dokument pdf-lib
+    let baseName = "plik";
+    let pageCount = 0;
+    let nameInputs = [];    // pola z nazwą pliku dla każdej strony
+    let emailInputs = [];   // pola z adresem e-mail dla każdej strony
+    let suppliers = [];     // nazwa dostawcy odczytana z każdej strony
+    let loadToken = 0;      // przerywa renderowanie miniatur po zmianie pliku
+
+    function setStatus(text, isError) {
+      statusEl.textContent = text;
+      statusEl.classList.toggle("error", !!isError);
+    }
+
+    function todayString() {
+      const d = new Date();
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      return `${dd}-${mm}-${d.getFullYear()}`;
+    }
+
+    // Usuwa znaki niedozwolone w nazwach plików (Windows/macOS/Linux).
+    function safeFileName(name) {
+      return name.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "");
+    }
+
+    // Grupuje fragmenty tekstu strony w linie (od góry do dołu).
+    function textLines(textContent) {
+      const lines = [];
+      for (const item of textContent.items) {
+        if (!item.str.trim()) continue;
+        const y = item.transform[5], x = item.transform[4];
+        let line = lines.find(l => Math.abs(l.y - y) < 2);
+        if (!line) lines.push(line = { y, parts: [] });
+        line.parts.push({ x, str: item.str });
+      }
+      lines.sort((a, b) => b.y - a.y);
+      return lines.map(l => ({
+        y: l.y,
+        text: l.parts.sort((a, b) => a.x - b.x).map(p => p.str).join(" ").replace(/\s+/g, " ").trim(),
+      }));
+    }
+
+    // Wzór "PAYMENT REFERENCE": nagłówek, adres płatnika, potem blok dostawcy.
+    // Bloki są oddzielone większymi odstępami; nazwa dostawcy to pierwsza
+    // linia trzeciego bloku.
+    function findSupplier(lines) {
+      const blocks = [];
+      let prevY = null;
+      for (const line of lines) {
+        if (prevY === null || prevY - line.y > 20) blocks.push([]);
+        blocks[blocks.length - 1].push(line);
+        prevY = line.y;
+      }
+      const header = blocks.findIndex(b => /PAYMENT REFERENCE/i.test(b[0].text));
+      const supplierBlock = header >= 0 ? blocks[header + 2] : null;
+      return supplierBlock ? supplierBlock[0].text : "";
+    }
+
+    // Nazwy plików: dostawca_data, a przy powtórzeniach dopisek _2, _3...
+    function currentFileNames() {
+      const used = new Map();
+      return nameInputs.map((input, i) => {
+        let name = safeFileName(input.value) || `${baseName}_strona_${i + 1}`;
+        const key = name.toLowerCase();
+        const n = (used.get(key) || 0) + 1;
+        used.set(key, n);
+        if (n > 1) name += `_${n}`;
+        return name + ".pdf";
+      });
+    }
+
+    // ---- Pamięć przeglądarki (może być niedostępna, np. w trybie prywatnym) ----
+    function loadJSON(key, fallback) {
+      try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
+    }
+    function saveJSON(key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* brak pamięci */ }
+    }
+
+    // ---- Książka adresowa: nazwa dostawcy -> e-mail ----
+    const BOOK_KEY = "pdfSplitter.addressBook";
+    let addressBook = loadJSON(BOOK_KEY, {});
+    const bookKey = name => name.trim().toLowerCase().replace(/\s+/g, " ");
+    function lookupEmail(supplier) {
+      return supplier ? (addressBook[bookKey(supplier)]?.email || "") : "";
+    }
+    function rememberEmail(supplier, email) {
+      if (!supplier) return;
+      const key = bookKey(supplier);
+      if (email) addressBook[key] = { name: supplier, email };
+      else delete addressBook[key];
+      saveJSON(BOOK_KEY, addressBook);
+      updateBookInfo();
+    }
+    function updateBookInfo() {
+      const n = Object.keys(addressBook).length;
+      bookInfo.textContent = `Zapamiętane adresy dostawców: ${n}.`;
+    }
+
+    // ---- Szablon wiadomości ----
+    const MAIL_KEY = "pdfSplitter.mailTemplate";
+    const defaultMail = {
+      subject: "Payment Reference - {dostawca} - {data}",
+      body: "Dear Sir/Madam,\n\nPlease find attached the payment reference for {dostawca}.\n\nKind regards",
+    };
+    const savedMail = loadJSON(MAIL_KEY, defaultMail);
+    mailSubject.value = savedMail.subject ?? defaultMail.subject;
+    mailBody.value = savedMail.body ?? defaultMail.body;
+    [mailSubject, mailBody].forEach(el => el.addEventListener("input", () =>
+      saveJSON(MAIL_KEY, { subject: mailSubject.value, body: mailBody.value })));
+
+    function fillTemplate(text, supplier) {
+      return text.replace(/\{dostawca\}/gi, supplier).replace(/\{data\}/gi, todayString());
+    }
+
+    const isEmail = s => /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(s);
+    // Kilka adresów można oddzielić przecinkiem lub średnikiem.
+    function parseEmails(value) {
+      return value.split(/[;,]/).map(s => s.trim()).filter(Boolean);
+    }
+
+    // ---- Budowa pliku .eml (szkic wiadomości z załącznikiem) ----
+    function bytesToBase64(bytes) {
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      }
+      return btoa(bin);
+    }
+    const utf8Base64 = text => bytesToBase64(new TextEncoder().encode(text));
+    const wrap76 = b64 => b64.replace(/.{1,76}/g, "$&\r\n");
+    // Nagłówki z polskimi/obcymi znakami kodujemy wg RFC 2047.
+    const encodeHeader = text => /^[\x20-\x7e]*$/.test(text) ? text : `=?UTF-8?B?${utf8Base64(text)}?=`;
+    const quoted = text => /^[\x20-\x7e]*$/.test(text) ? `"${text.replace(/["\\]/g, "\\$&")}"` : `"${encodeHeader(text)}"`;
+
+    function buildEml({ to, subject, body, fileName, pdfBytes }) {
+      const boundary = "----=_Part_" + Math.random().toString(36).slice(2);
+      return [
+        `To: ${to.join(", ")}`,
+        `Subject: ${encodeHeader(subject)}`,
+        `Date: ${new Date().toUTCString().replace("GMT", "+0000")}`,
+        "X-Unsent: 1",
+        "MIME-Version: 1.0",
+        `Content-Type: multipart/mixed; boundary="${boundary}"`,
+        "",
+        `--${boundary}`,
+        "Content-Type: text/plain; charset=UTF-8",
+        "Content-Transfer-Encoding: base64",
+        "",
+        wrap76(utf8Base64(body.replace(/\r?\n/g, "\r\n"))),
+        `--${boundary}`,
+        `Content-Type: application/pdf; name=${quoted(fileName)}`,
+        "Content-Transfer-Encoding: base64",
+        `Content-Disposition: attachment; filename=${quoted(fileName)}`,
+        "",
+        wrap76(bytesToBase64(pdfBytes)),
+        `--${boundary}--`,
+        "",
+      ].join("\r\n");
+    }
+
+    // Zwraca adresy dla strony albo null (i zaznacza pole), gdy brak/niepoprawne.
+    function recipientsFor(i) {
+      const input = emailInputs[i];
+      const list = parseEmails(input.value);
+      const ok = list.length > 0 && list.every(isEmail);
+      input.classList.toggle("missing", !ok);
+      return ok ? list : null;
+    }
+
+    async function buildMail(i, fileName) {
+      const supplier = suppliers[i] || fileName.replace(/\.pdf$/i, "");
+      return buildEml({
+        to: recipientsFor(i),
+        subject: fillTemplate(mailSubject.value, supplier),
+        body: fillTemplate(mailBody.value, supplier),
+        fileName,
+        pdfBytes: await buildPage(i),
+      });
+    }
+
+    async function buildPage(i) {
+      const out = await PDFLib.PDFDocument.create();
+      const [copied] = await out.copyPages(srcDoc, [i]);
+      out.addPage(copied);
+      return out.save();
+    }
+
+    function download(bytes, name, type) {
+      const url = URL.createObjectURL(new Blob([bytes], { type }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }
+
+    async function handleFile(file) {
+      if (!file) return;
+      if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) {
+        setStatus("To nie jest plik PDF.", true);
+        return;
+      }
+
+      const token = ++loadToken;
+      pagesEl.innerHTML = "";
+      nameInputs = [];
+      emailInputs = [];
+      suppliers = [];
+      toolbar.classList.remove("visible");
+      setStatus("Wczytywanie pliku…");
+
+      let pdf;
+      try {
+        const buf = await file.arrayBuffer();
+        srcDoc = await PDFLib.PDFDocument.load(buf, { ignoreEncryption: true });
+        pageCount = srcDoc.getPageCount();
+        baseName = safeFileName(file.name.replace(/\.pdf$/i, "")) || "plik";
+        pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
+      } catch (e) {
+        console.error(e);
+        srcDoc = null;
+        setStatus("Nie udało się odczytać pliku. Może jest uszkodzony lub zabezpieczony hasłem.", true);
+        return;
+      }
+
+      setStatus("Odczytywanie nazw dostawców…");
+      const date = todayString();
+      const pages = [];
+      let missing = 0;
+      for (let i = 0; i < pageCount; i++) {
+        if (token !== loadToken) { pdf.destroy(); return; }
+        const page = await pdf.getPage(i + 1);
+        let supplier = "";
+        try { supplier = findSupplier(textLines(await page.getTextContent())); } catch (e) { console.warn(e); }
+        if (!supplier) missing++;
+        pages.push({ page, supplier });
+        suppliers.push(supplier);
+      }
+
+      const thumbs = [];
+      pages.forEach(({ supplier }, i) => {
+        const card = document.createElement("div");
+        card.className = "page";
+
+        const thumb = document.createElement("div");
+        thumb.className = "thumb";
+        thumb.textContent = "…";
+
+        const label = document.createElement("div");
+        label.className = "label";
+        label.textContent = `Strona ${i + 1}`;
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "name" + (supplier ? "" : " missing");
+        input.value = supplier ? `${safeFileName(supplier)}_${date}` : `${baseName}_strona_${i + 1}`;
+        input.title = "Nazwa pliku (bez .pdf). Możesz ją poprawić.";
+        input.setAttribute("aria-label", `Nazwa pliku dla strony ${i + 1}`);
+        input.addEventListener("input", () => input.classList.remove("missing"));
+
+        const email = document.createElement("input");
+        email.type = "email";
+        email.className = "email";
+        email.placeholder = "e-mail dostawcy";
+        email.value = lookupEmail(supplier);
+        email.title = "Adres e-mail dostawcy. Kilka adresów oddziel przecinkiem.";
+        email.setAttribute("aria-label", `Adres e-mail dostawcy dla strony ${i + 1}`);
+        email.addEventListener("input", () => email.classList.remove("missing"));
+        email.addEventListener("change", () => {
+          // Zapamiętuj tylko poprawne adresy (albo usunięcie adresu).
+          const list = parseEmails(email.value);
+          if (list.every(isEmail)) rememberEmail(supplier, list.join(", "));
+        });
+
+        const mailBtn = document.createElement("button");
+        mailBtn.className = "secondary";
+        mailBtn.textContent = "E-mail";
+        mailBtn.title = "Utwórz wiadomość z tą stroną w załączniku";
+        mailBtn.addEventListener("click", async () => {
+          if (!recipientsFor(i)) {
+            setStatus(`Wpisz poprawny adres e-mail dostawcy dla strony ${i + 1}.`, true);
+            email.focus();
+            return;
+          }
+          mailBtn.disabled = true;
+          try {
+            const fileName = currentFileNames()[i];
+            download(await buildMail(i, fileName), fileName.replace(/\.pdf$/i, ".eml"), "message/rfc822");
+            setStatus(`Utworzono wiadomość do: ${email.value}. Otwórz pobrany plik .eml i kliknij „Wyślij”.`);
+          } catch (e) {
+            setStatus(`Nie udało się utworzyć wiadomości: ${e.message}`, true);
+          } finally {
+            mailBtn.disabled = false;
+          }
+        });
+
+        const btn = document.createElement("button");
+        btn.textContent = "Pobierz";
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          try {
+            download(await buildPage(i), currentFileNames()[i], "application/pdf");
+          } catch (e) {
+            setStatus(`Nie udało się zapisać strony ${i + 1}: ${e.message}`, true);
+          } finally {
+            btn.disabled = false;
+          }
+        });
+
+        const row = document.createElement("div");
+        row.className = "row";
+        row.append(btn, mailBtn);
+
+        card.append(thumb, label, input, email, row);
+        pagesEl.appendChild(card);
+        thumbs.push(thumb);
+        nameInputs.push(input);
+        emailInputs.push(email);
+      });
+
+      infoEl.textContent = `${file.name}: ${pageCount} ${pageCount === 1 ? "strona" : (pageCount % 10 >= 2 && pageCount % 10 <= 4 && (pageCount % 100 < 10 || pageCount % 100 >= 20) ? "strony" : "stron")}`;
+      toolbar.classList.add("visible");
+      setStatus(missing
+        ? `Nie znaleziono nazwy dostawcy na ${missing} z ${pageCount} stron (zaznaczone na czerwono). Wpisz nazwę ręcznie.`
+        : "", missing > 0);
+
+      renderThumbnails(pdf, pages.map(p => p.page), thumbs, token);
+    }
+
+    async function renderThumbnails(pdf, pages, thumbs, token) {
+      try {
+        for (let i = 0; i < pages.length; i++) {
+          if (token !== loadToken) break;
+          const page = pages[i];
+          const viewport0 = page.getViewport({ scale: 1 });
+          const scale = 300 / Math.max(viewport0.width, viewport0.height);
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+          await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+          thumbs[i].textContent = "";
+          thumbs[i].appendChild(canvas);
+          page.cleanup();
+        }
+      } catch (e) {
+        console.warn("Podgląd niedostępny:", e);
+        thumbs.forEach(t => { if (!t.querySelector("canvas")) t.textContent = "brak podglądu"; });
+      } finally {
+        pdf.destroy();
+      }
+    }
+
+    zipBtn.addEventListener("click", async () => {
+      if (!srcDoc) return;
+      zipBtn.disabled = true;
+      try {
+        const zip = new JSZip();
+        const names = currentFileNames();
+        for (let i = 0; i < pageCount; i++) {
+          setStatus(`Przygotowywanie strony ${i + 1} z ${pageCount}…`);
+          zip.file(names[i], await buildPage(i));
+        }
+        setStatus("Pakowanie do ZIP…");
+        const blob = await zip.generateAsync({ type: "blob" });
+        download(blob, `${baseName}_${todayString()}.zip`, "application/zip");
+        setStatus(`Gotowe: ${pageCount} plików w archiwum ZIP.`);
+      } catch (e) {
+        console.error(e);
+        setStatus(`Błąd podczas tworzenia ZIP: ${e.message}`, true);
+      } finally {
+        zipBtn.disabled = false;
+      }
+    });
+
+    mailZipBtn.addEventListener("click", async () => {
+      if (!srcDoc) return;
+      const ready = [];
+      for (let i = 0; i < pageCount; i++) if (recipientsFor(i)) ready.push(i);
+      const skipped = pageCount - ready.length;
+      if (!ready.length) {
+        setStatus("Żadna strona nie ma poprawnego adresu e-mail. Uzupełnij pola zaznaczone na czerwono.", true);
+        return;
+      }
+      mailZipBtn.disabled = true;
+      try {
+        const zip = new JSZip();
+        const names = currentFileNames();
+        for (const [n, i] of ready.entries()) {
+          setStatus(`Przygotowywanie wiadomości ${n + 1} z ${ready.length}…`);
+          zip.file(names[i].replace(/\.pdf$/i, ".eml"), await buildMail(i, names[i]));
+        }
+        const blob = await zip.generateAsync({ type: "blob" });
+        download(blob, `${baseName}_emaile_${todayString()}.zip`, "application/zip");
+        setStatus(`Gotowe: ${ready.length} wiadomości w archiwum ZIP.` +
+          (skipped ? ` Pominięto ${skipped} stron bez adresu e-mail (zaznaczone na czerwono).` : ""), skipped > 0);
+      } catch (e) {
+        console.error(e);
+        setStatus(`Błąd podczas tworzenia wiadomości: ${e.message}`, true);
+      } finally {
+        mailZipBtn.disabled = false;
+      }
+    });
+
+    importBtn.addEventListener("click", () => importInput.click());
+    importInput.addEventListener("change", async () => {
+      const file = importInput.files[0];
+      importInput.value = "";
+      if (!file) return;
+      let added = 0;
+      for (const line of (await file.text()).split(/\r?\n/)) {
+        const m = line.match(/^\s*"?(.+?)"?\s*[;,\t]\s*"?([^"]+?)"?\s*$/);
+        if (!m) continue;
+        const list = parseEmails(m[2]);
+        if (!list.length || !list.every(isEmail)) continue;   // np. wiersz nagłówka
+        addressBook[bookKey(m[1])] = { name: m[1].trim(), email: list.join(", ") };
+        added++;
+      }
+      saveJSON(BOOK_KEY, addressBook);
+      updateBookInfo();
+      // Uzupełnij puste pola na bieżącej liście.
+      emailInputs.forEach((input, i) => { if (!input.value) input.value = lookupEmail(suppliers[i]); });
+      setStatus(`Wczytane adresy dostawców: ${added}.`);
+    });
+
+    exportBtn.addEventListener("click", () => {
+      const rows = Object.values(addressBook)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(({ name, email }) => `${name.includes(";") ? `"${name}"` : name};${email}`);
+      download("\ufeff" + ["dostawca;email", ...rows].join("\r\n"), "adresy_dostawcow.csv", "text/csv");
+    });
+
+    updateBookInfo();
+
+    resetBtn.addEventListener("click", () => {
+      loadToken++;
+      srcDoc = null;
+      nameInputs = [];
+      emailInputs = [];
+      suppliers = [];
+      pagesEl.innerHTML = "";
+      toolbar.classList.remove("visible");
+      setStatus("");
+      fileInput.value = "";
+      fileInput.click();
+    });
+
+    fileInput.addEventListener("change", () => handleFile(fileInput.files[0]));
+
+    ["dragenter", "dragover"].forEach(ev => dropzone.addEventListener(ev, e => {
+      e.preventDefault();
+      dropzone.classList.add("drag");
+    }));
+    ["dragleave", "drop"].forEach(ev => dropzone.addEventListener(ev, e => {
+      e.preventDefault();
+      dropzone.classList.remove("drag");
+    }));
+    dropzone.addEventListener("drop", e => handleFile(e.dataTransfer.files[0]));
+  </script>
+</body>
+</html>
