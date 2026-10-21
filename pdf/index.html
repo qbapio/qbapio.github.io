@@ -161,7 +161,7 @@
 <body>
   <main>
     <h1>Dzielenie PDF na strony</h1>
-    <p class="lead">Wrzuć plik PDF „Payment Reference”, a każda jego strona stanie się osobnym plikiem PDF o nazwie <em>nazwa dostawcy_dzisiejsza data</em>. Nazwę możesz poprawić przed pobraniem. Każdą stronę możesz też przygotować do wysłania e-mailem do dostawcy. Wszystko dzieje się w Twojej przeglądarce. Plik nie jest nigdzie wysyłany.</p>
+    <p class="lead">Wrzuć plik PDF „Payment Reference”, a każda jego strona stanie się osobnym plikiem PDF o nazwie <em>nazwa dostawcy dd.mm.rrrr</em> (z dzisiejszą datą). Nazwę możesz poprawić przed pobraniem. Każdą stronę możesz też przygotować do wysłania e-mailem do dostawcy. Wszystko dzieje się w Twojej przeglądarce. Plik nie jest nigdzie wysyłany.</p>
 
     <label class="dropzone" id="dropzone">
       <strong>Przeciągnij tutaj plik PDF</strong>
@@ -245,7 +245,7 @@
       const d = new Date();
       const dd = String(d.getDate()).padStart(2, "0");
       const mm = String(d.getMonth() + 1).padStart(2, "0");
-      return `${dd}-${mm}-${d.getFullYear()}`;
+      return `${dd}.${mm}.${d.getFullYear()}`;
     }
 
     // Usuwa znaki niedozwolone w nazwach plików (Windows/macOS/Linux).
@@ -286,7 +286,7 @@
       return supplierBlock ? supplierBlock[0].text : "";
     }
 
-    // Nazwy plików: dostawca_data, a przy powtórzeniach dopisek _2, _3...
+    // Nazwy plików: "dostawca dd.mm.rrrr", a przy powtórzeniach dopisek (2), (3)...
     function currentFileNames() {
       const used = new Map();
       return nameInputs.map((input, i) => {
@@ -294,7 +294,7 @@
         const key = name.toLowerCase();
         const n = (used.get(key) || 0) + 1;
         used.set(key, n);
-        if (n > 1) name += `_${n}`;
+        if (n > 1) name += ` (${n})`;
         return name + ".pdf";
       });
     }
@@ -486,7 +486,7 @@
         const input = document.createElement("input");
         input.type = "text";
         input.className = "name" + (supplier ? "" : " missing");
-        input.value = supplier ? `${safeFileName(supplier)}_${date}` : `${baseName}_strona_${i + 1}`;
+        input.value = supplier ? `${safeFileName(supplier)} ${date}` : `${baseName}_strona_${i + 1}`;
         input.title = "Nazwa pliku (bez .pdf). Możesz ją poprawić.";
         input.setAttribute("aria-label", `Nazwa pliku dla strony ${i + 1}`);
         input.addEventListener("input", () => input.classList.remove("missing"));
